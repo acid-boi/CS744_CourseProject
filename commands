@@ -1,0 +1,17 @@
+docker build --no-cache -t kv_server_image .
+
+docker run -d \
+  --name kv_postgres \
+  --network host \
+  -e POSTGRES_PASSWORD=1234 \
+  -e POSTGRES_DB=kvdb \
+  postgres:16
+
+
+docker run -d \
+  --name kv_server \
+  --network host \
+  kv_server_image
+
+
+

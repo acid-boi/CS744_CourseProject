@@ -1,0 +1,16 @@
+# Copy-paste this entire block to run all tests
+echo "=== Health Check ===" && \
+curl http://localhost:8080/health && \
+echo -e "\n\n=== Store Values ===" && \
+curl -X POST http://localhost:8080/put -d "key=user1" -d "value=Alice" && \
+curl -X POST http://localhost:8080/put -d "key=user2" -d "value=Bob" && \
+echo -e "\n\n=== Retrieve Values ===" && \
+curl "http://localhost:8080/get?key=user1" && \
+curl "http://localhost:8080/get?key=user2" && \
+echo -e "\n\n=== Update Value ===" && \
+curl -X POST http://localhost:8080/put -d "key=user1" -d "value=AliceUpdated" && \
+curl "http://localhost:8080/get?key=user1" && \
+echo -e "\n\n=== Delete Value ===" && \
+curl -X DELETE "http://localhost:8080/delete?key=user1" && \
+curl "http://localhost:8080/get?key=user1" && \
+echo -e "\n\n=== Tests Complete ==="
