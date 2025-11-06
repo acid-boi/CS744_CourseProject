@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  kv_postgres:
+    image: postgres:15
+    container_name: kv_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
+      POSTGRES_DB: kvdb
+    volumes:
+      - /mnt/database:/var/lib/postgresql/data
+    networks:
+      - kv_network
+    cpuset: "0"         
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  kv_redis:
+    image: redis:7
+    container_name: kv_redis
+    command: redis-server --save "" --appendonly no
+    networks:
+      - kv_network
+    cpuset: "1"          
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  kv_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kv_server
+    ports:
+      - "8080:8080"
+    networks:
+      - kv_network
+    depends_on:
+      kv_postgres:
+        condition: service_healthy
+      kv_redis:
+        condition: service_healthy
+    cpuset: "2"              
+    restart: unless-stopped
+
+networks:
+  kv_network:
+    driver: bridge
+
