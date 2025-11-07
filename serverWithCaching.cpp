@@ -12,6 +12,7 @@ using namespace sw::redis;
 PGconn *conn = nullptr;
 Redis *redis = nullptr;
 std::mutex db_mutex;
+std::mutex redis_mutex;  // Protect Redis operations
 
 // ----------------- Init DB -----------------------------------------------------------
 void init_db() {
@@ -42,7 +43,7 @@ void init_redis() {
         opts.socket_timeout = std::chrono::milliseconds(100);
         
         redis = new Redis(opts);
-        redis->ping();  // Test connection
+        redis->ping();
         std::cout << "Connected to Redis\n";
     } catch (const sw::redis::Error &err) {
         std::cerr << "Redis connection failed: " << err.what() << std::endl;
@@ -71,42 +72,59 @@ std::string get_kv_db(const std::string &key) {
     return value;
 }
 
-void delete_kv_db(const std::string &key) {
+bool delete_kv_db(const std::string &key) {
     std::lock_guard<std::mutex> lock(db_mutex);
     std::string query = "DELETE FROM kv_store WHERE key='" + key + "';";
     PGresult *res = PQexec(conn, query.c_str());
+    bool deleted = (PQresultStatus(res) == PGRES_COMMAND_OK && atoi(PQcmdTuples(res)) > 0);
     PQclear(res);
+    return deleted;
 }
 
 // ----------------- Cache-aware Handlers (Write-Through) -----------------
 void put_kv(const std::string &key, const std::string &value) {
+    // Lock both to ensure atomicity and prevent cache-DB inconsistency
+    std::lock_guard<std::mutex> redis_lock(redis_mutex);
+    std::lock_guard<std::mutex> db_lock(db_mutex);
+    
     try {
-        redis->set(key, value);      
-        put_kv_db(key, value);      
+        redis->set(key, value);
     } catch (const sw::redis::Error &err) {
         std::cerr << "Redis error in put_kv: " << err.what() << std::endl;
-        // Still write to DB even if Redis fails
-        put_kv_db(key, value);
     }
+    
+    // Write to DB (inside same critical section)
+    std::string query =
+        "INSERT INTO kv_store (key, value) VALUES ('" + key + "', '" + value + "') "
+        "ON CONFLICT (key) DO UPDATE SET value='" + value + "';";
+    PGresult *res = PQexec(conn, query.c_str());
+    PQclear(res);
 }
 
 std::string get_kv(const std::string &key) {
-    try {
-        auto val = redis->get(key);
-        if (val) {
-            std::cout << "Cache hit for key: " << key << std::endl;
-            return *val;             // cache hit
+    // Check cache first (with lock)
+    {
+        std::lock_guard<std::mutex> lock(redis_mutex);
+        try {
+            auto val = redis->get(key);
+            if (val) {
+                std::cout << "Cache hit for key: " << key << std::endl;
+                return *val;
+            }
+        } catch (const sw::redis::Error &err) {
+            std::cerr << "Redis error in get_kv: " << err.what() << std::endl;
         }
-    } catch (const sw::redis::Error &err) {
-        std::cerr << "Redis error in get_kv: " << err.what() << std::endl;
     }
 
-    // cache miss -> DB lookup
+    // Cache miss -> DB lookup
     std::cout << "Cache miss for key: " << key << std::endl;
     auto db_val = get_kv_db(key);
+    
     if (!db_val.empty()) {
+        // Populate cache (with lock)
+        std::lock_guard<std::mutex> lock(redis_mutex);
         try {
-            redis->set(key, db_val);  // populate cache
+            redis->set(key, db_val);
         } catch (const sw::redis::Error &err) {
             std::cerr << "Redis error caching value: " << err.what() << std::endl;
         }
@@ -114,13 +132,22 @@ std::string get_kv(const std::string &key) {
     return db_val;
 }
 
-void delete_kv(const std::string &key) {
+bool delete_kv(const std::string &key) {
+    // Lock both to ensure atomicity
+    std::lock_guard<std::mutex> redis_lock(redis_mutex);
+    std::lock_guard<std::mutex> db_lock(db_mutex);
+    
     try {
         redis->del(key);
     } catch (const sw::redis::Error &err) {
         std::cerr << "Redis error in delete_kv: " << err.what() << std::endl;
     }
-    delete_kv_db(key);
+    
+    std::string query = "DELETE FROM kv_store WHERE key='" + key + "';";
+    PGresult *res = PQexec(conn, query.c_str());
+    bool deleted = (PQresultStatus(res) == PGRES_COMMAND_OK && atoi(PQcmdTuples(res)) > 0);
+    PQclear(res);
+    return deleted;
 }
 
 // ----------------- main() -----------------
@@ -168,8 +195,12 @@ int main() {
             res.set_content("Missing key\n", "text/plain");
             return;
         }
-        delete_kv(key);
-        res.set_content("Deleted\n", "text/plain");
+        if (delete_kv(key)) {
+            res.set_content("Deleted\n", "text/plain");
+        } else {
+            res.status = 404;
+            res.set_content("Not found\n", "text/plain");
+        }
     });
 
     std::cout << "Server running on port 8080...\n";
