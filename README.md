@@ -1,5 +1,7 @@
 # Key-Value Store
 
+GitHub Repository: https://github.com/acid-boi/CS744_CourseProject
+
 This project implements a simple key-value store with a C++ server, PostgreSQL database, and Redis cache.
 
 ## Prerequisites
@@ -50,4 +52,12 @@ To delete a key-value pair, send a `DELETE` request to the `/delete` endpoint:
 
 ```bash
 curl -X DELETE "http://localhost:8080/delete?key=mykey"
+```
+
+### Check Cache
+
+To check if a key exists in the cache, send a `GET` request to the `/check_cache` endpoint:
+
+```bash
+curl "http://localhost:8080/check_cache?key=mykey"
 ```

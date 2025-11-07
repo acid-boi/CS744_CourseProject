@@ -193,6 +193,31 @@ int main() {
         }
     });
 
+svr.Get("/check_cache", [](const Request &req, Response &res) {
+    auto key = req.get_param_value("key");
+    if (key.empty()) {
+        res.status = 400;
+        res.set_content("Missing key\n", "text/plain");
+        return;
+    }
+    try {
+        std::lock_guard<std::mutex> lock(redis_mutex);
+        auto exists = redis->exists(key);
+        if (exists > 0)
+            res.set_content("Key exists in cache\n", "text/plain");
+        else {
+            res.status = 404;
+            res.set_content("Key not in cache\n", "text/plain");
+        }
+    } catch (const sw::redis::Error &err) {
+        res.status = 500;
+        res.set_content("Redis error\n", "text/plain");
+    }
+});
+
+
+
+
     std::cout << "Server running on port 8080...\n";
     svr.listen("0.0.0.0", 8080);
 
