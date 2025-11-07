@@ -8,13 +8,11 @@
 using namespace httplib;
 using namespace sw::redis;
 
-// ----------------- Globals --------------------------------------------------
 PGconn *conn = nullptr;
 Redis *redis = nullptr;
 std::mutex db_mutex;
-std::mutex redis_mutex;  // Protect Redis operations
+std::mutex redis_mutex;  
 
-// ----------------- Init DB -----------------------------------------------------------
 void init_db() {
     conn = PQconnectdb("host=kv_postgres port=5432 dbname=kvdb user=postgres password=1234");
     if (PQstatus(conn) != CONNECTION_OK) {
@@ -34,7 +32,6 @@ void init_db() {
     std::cout << "Database ready\n";
 }
 
-// ----------------- Init Redis -----------------
 void init_redis() {
     try {
         ConnectionOptions opts;
@@ -51,7 +48,6 @@ void init_redis() {
     }
 }
 
-// ----------------- DB Functions -----------------
 void put_kv_db(const std::string &key, const std::string &value) {
     std::lock_guard<std::mutex> lock(db_mutex);
     std::string query =
@@ -81,7 +77,6 @@ bool delete_kv_db(const std::string &key) {
     return deleted;
 }
 
-// ----------------- Cache-aware Handlers (Write-Through) -----------------
 void put_kv(const std::string &key, const std::string &value) {
     // Lock both to ensure atomicity and prevent cache-DB inconsistency
     std::lock_guard<std::mutex> redis_lock(redis_mutex);
@@ -93,7 +88,6 @@ void put_kv(const std::string &key, const std::string &value) {
         std::cerr << "Redis error in put_kv: " << err.what() << std::endl;
     }
     
-    // Write to DB (inside same critical section)
     std::string query =
         "INSERT INTO kv_store (key, value) VALUES ('" + key + "', '" + value + "') "
         "ON CONFLICT (key) DO UPDATE SET value='" + value + "';";
@@ -116,12 +110,10 @@ std::string get_kv(const std::string &key) {
         }
     }
 
-    // Cache miss -> DB lookup
     std::cout << "Cache miss for key: " << key << std::endl;
     auto db_val = get_kv_db(key);
     
     if (!db_val.empty()) {
-        // Populate cache (with lock)
         std::lock_guard<std::mutex> lock(redis_mutex);
         try {
             redis->set(key, db_val);
@@ -133,7 +125,6 @@ std::string get_kv(const std::string &key) {
 }
 
 bool delete_kv(const std::string &key) {
-    // Lock both to ensure atomicity
     std::lock_guard<std::mutex> redis_lock(redis_mutex);
     std::lock_guard<std::mutex> db_lock(db_mutex);
     
@@ -150,7 +141,6 @@ bool delete_kv(const std::string &key) {
     return deleted;
 }
 
-// ----------------- main() -----------------
 int main() {
     std::cout << "Starting KV Server with Redis cache...\n";
     
