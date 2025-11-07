@@ -8,14 +8,13 @@
 using namespace httplib;
 using namespace sw::redis;
 
-// ----------------- Globals -----------------
+// ----------------- Globals --------------------------------------------------
 PGconn *conn = nullptr;
 Redis *redis = nullptr;
 std::mutex db_mutex;
 
-// ----------------- Init DB -----------------
+// ----------------- Init DB -----------------------------------------------------------
 void init_db() {
-    // Use container name or localhost depending on network mode
     conn = PQconnectdb("host=kv_postgres port=5432 dbname=kvdb user=postgres password=1234");
     if (PQstatus(conn) != CONNECTION_OK) {
         std::cerr << "DB connection failed: " << PQerrorMessage(conn) << std::endl;
@@ -37,7 +36,6 @@ void init_db() {
 // ----------------- Init Redis -----------------
 void init_redis() {
     try {
-        // Use localhost since you're using --network host
         ConnectionOptions opts;
         opts.host = "kv_redis";
         opts.port = 6379;
@@ -83,8 +81,8 @@ void delete_kv_db(const std::string &key) {
 // ----------------- Cache-aware Handlers (Write-Through) -----------------
 void put_kv(const std::string &key, const std::string &value) {
     try {
-        redis->set(key, value);      // write to cache first
-        put_kv_db(key, value);       // then write to DB (write-through)
+        redis->set(key, value);      
+        put_kv_db(key, value);      
     } catch (const sw::redis::Error &err) {
         std::cerr << "Redis error in put_kv: " << err.what() << std::endl;
         // Still write to DB even if Redis fails
